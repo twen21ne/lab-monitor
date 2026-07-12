@@ -41,14 +41,12 @@ STATE_FILE = "state.json"
 COINGECKO_API_KEY = os.environ.get("COINGECKO_API_KEY")
 
 # ---- Пороги (настраиваются здесь) ----
-# ТЕСТОВЫЕ ЗНАЧЕНИЯ — после проверки Telegram верни боевые:
-# FUNDING_RATE_THRESHOLD = 0.001, ALERT_MIN_SIGNALS = 2
-FUNDING_RATE_THRESHOLD = 0.00000001    # тест: почти ноль, чтобы гарантированно сработало
+FUNDING_RATE_THRESHOLD = 0.001         # 0.1% за период расчёта funding rate
 OI_CHANGE_1H_THRESHOLD = 0.15          # +15% за 1 час
 OI_CHANGE_24H_THRESHOLD = 0.25         # +25% за 24 часа
 PRICE_MOVE_INTERVAL_THRESHOLD = 0.05   # 5% за один запуск (15 мин) — компонент liq-proxy
 OI_DROP_INTERVAL_THRESHOLD = 0.05      # 5% падение OI за один запуск — компонент liq-proxy
-ALERT_MIN_SIGNALS = 1                  # тест: 1 из 3 (боевое значение — 2)
+ALERT_MIN_SIGNALS = 2                  # алерт "внимание", если сработало 2 из 3 метрик одновременно
 
 # Быстрые ссылки, добавляются в конец каждого алерта
 QUICK_LINKS = (
