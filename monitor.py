@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-LAB Monitor — простой скрипт мониторинга признаков пампа/дампа на LABUSDT (Binance Futures).
+LAB Monitor — простой скрипт мониторинга признаков пампа/дампа на LABUSDT (Bybit Futures).
 
-Использует только бесплатные публичные эндпоинты Binance (без API-ключа).
+Использует только бесплатные публичные эндпоинты Bybit (без API-ключа).
+(Изначально использовался Binance, но он блокирует запросы с IP GitHub Actions — см. ниже.)
 Состояние (история последних измерений) хранится в state.json и коммитится обратно в репозиторий
 GitHub Actions'ом, чтобы скрипт "помнил" предыдущие точки между запусками.
 
@@ -23,8 +24,14 @@ import time
 import requests
 
 SYMBOL = "LABUSDT"
-BASE_URL = "https://fapi.binance.com"
+BASE_URL = "https://api.bybit.com"
 STATE_FILE = "state.json"
+
+# Раньше использовался Binance (fapi.binance.com), но он возвращает HTTP 451
+# "Service unavailable from a restricted location" для запросов с серверов GitHub Actions
+# (и вообще многих облачных дата-центров) — это ограничение биржи, не баг кода.
+# Bybit отдаёт те же данные (цена, funding rate, open interest) без такой блокировки,
+# причём одним запросом вместо двух.
 
 # ---- Пороги (настраиваются здесь) ----
 FUNDING_RATE_THRESHOLD = 0.001        # 0.1% за период расчёта funding rate
@@ -40,7 +47,7 @@ TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 
 def fetch_json(url, params):
-    """GET-запрос с понятной диагностикой: если Binance вернул не то, что ожидалось,
+    """GET-запрос с понятной диагностикой: если биржа вернула не то, что ожидалось,
     выводим статус-код и сырое тело ответа в лог, а не падаем с невнятным KeyError."""
     resp = requests.get(url, params=params, timeout=10)
     print(f"[DEBUG] GET {url} params={params} -> HTTP {resp.status_code}")
@@ -50,25 +57,28 @@ def fetch_json(url, params):
         print(f"[ERROR] Ответ не в формате JSON. Сырое тело ответа:\n{resp.text[:1000]}")
         raise
     if resp.status_code != 200:
-        print(f"[ERROR] Binance вернул ошибку вместо данных: {data}")
+        print(f"[ERROR] Биржа вернула ошибку вместо данных: {data}")
     return data
 
 
 def fetch_current_data():
-    """Забираем funding rate, цену и open interest с публичного Binance Futures API."""
-    premium = fetch_json(f"{BASE_URL}/fapi/v1/premiumIndex", {"symbol": SYMBOL})
-    oi = fetch_json(f"{BASE_URL}/fapi/v1/openInterest", {"symbol": SYMBOL})
+    """Забираем funding rate, цену и open interest с публичного Bybit API (один запрос)."""
+    data = fetch_json(f"{BASE_URL}/v5/market/tickers", {"category": "linear", "symbol": SYMBOL})
 
-    if "markPrice" not in premium:
-        raise RuntimeError(f"В ответе premiumIndex нет markPrice. Полный ответ: {premium}")
-    if "openInterest" not in oi:
-        raise RuntimeError(f"В ответе openInterest нет openInterest. Полный ответ: {oi}")
+    if data.get("retCode") != 0:
+        raise RuntimeError(f"Bybit вернул ошибку: {data}")
+
+    ticker_list = data.get("result", {}).get("list", [])
+    if not ticker_list:
+        raise RuntimeError(f"Bybit вернул пустой список тикеров для {SYMBOL}. Полный ответ: {data}")
+
+    ticker = ticker_list[0]
 
     return {
         "timestamp": int(time.time()),
-        "price": float(premium["markPrice"]),
-        "funding_rate": float(premium["lastFundingRate"]),
-        "open_interest": float(oi["openInterest"]),
+        "price": float(ticker["markPrice"]),
+        "funding_rate": float(ticker["fundingRate"]),
+        "open_interest": float(ticker["openInterest"]),
     }
 
 
