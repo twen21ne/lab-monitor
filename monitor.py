@@ -41,11 +41,22 @@ STATE_FILE = "state.json"
 COINGECKO_API_KEY = os.environ.get("COINGECKO_API_KEY")
 
 # ---- Пороги (настраиваются здесь) ----
-FUNDING_RATE_THRESHOLD = 0.000001        # 0.1% за период расчёта funding rate
-OI_CHANGE_1H_THRESHOLD = 0.15         # +15% за 1 час
-OI_CHANGE_24H_THRESHOLD = 0.25        # +25% за 24 часа
-PRICE_MOVE_INTERVAL_THRESHOLD = 0.05  # 5% за один запуск (15 мин) — компонент liq-proxy
-OI_DROP_INTERVAL_THRESHOLD = 0.05     # 5% падение OI за один запуск — компонент liq-proxy
+# ТЕСТОВЫЕ ЗНАЧЕНИЯ — после проверки Telegram верни боевые:
+# FUNDING_RATE_THRESHOLD = 0.001, ALERT_MIN_SIGNALS = 2
+FUNDING_RATE_THRESHOLD = 0.00000001    # тест: почти ноль, чтобы гарантированно сработало
+OI_CHANGE_1H_THRESHOLD = 0.15          # +15% за 1 час
+OI_CHANGE_24H_THRESHOLD = 0.25         # +25% за 24 часа
+PRICE_MOVE_INTERVAL_THRESHOLD = 0.05   # 5% за один запуск (15 мин) — компонент liq-proxy
+OI_DROP_INTERVAL_THRESHOLD = 0.05      # 5% падение OI за один запуск — компонент liq-proxy
+ALERT_MIN_SIGNALS = 1                  # тест: 1 из 3 (боевое значение — 2)
+
+# Быстрые ссылки, добавляются в конец каждого алерта
+QUICK_LINKS = (
+    "\n\n🔗 Быстрые ссылки:\n"
+    "• Long/Short, funding, OI, ликвидации: https://www.coinglass.com/currencies/LAB\n"
+    "• График (TradingView): https://www.tradingview.com/symbols/LABUSDT.P/\n"
+    "• Холдеры (BscScan): https://bscscan.com/token/0x7ec43cf65f1663f820427c62a5780b8f2e25593a#balances"
+)
 
 MAX_HISTORY_POINTS = 100  # ~25 часов при интервале 15 минут
 
@@ -182,26 +193,35 @@ def main():
             )
 
     unique_signals = set(signals)
+    meets_alert_condition = len(unique_signals) >= ALERT_MIN_SIGNALS
+    previously_triggered = state.get("previously_triggered", False)
 
     print(f"[{current['timestamp']}] price={current['price']} funding={fr} oi={current['open_interest']}")
-    print(f"Сработавшие сигналы: {unique_signals}")
+    print(f"Сработавшие сигналы: {unique_signals} | было триггерено на прошлом запуске: {previously_triggered}")
 
-    # ВРЕМЕННО для теста: было len(unique_signals) >= 2, снижено до >= 1,
-    # чтобы проверить именно доставку в Telegram, не дожидаясь накопления истории OI.
-    # После успешного теста верни обратно >= 2.
-    if len(unique_signals) >= 1:
+    # Алерт "внимание" отправляется только по ФРОНТУ — когда условие только что стало истинным,
+    # а на прошлом запуске было ложным. Пока условие держится дальше без изменений — не спамим.
+    # Следующее уведомление придёт, когда условие сначала станет ложным, а потом снова истинным.
+    if meets_alert_condition and not previously_triggered:
         message = (
-            f"⚠️ LAB: сработало {len(unique_signals)} сигнала одновременно\n\n"
+            f"⚠️ LAB: сработало {len(unique_signals)} сигнал(ов)\n\n"
             + "\n".join(details)
             + f"\n\nЦена: ${current['price']:.4f}"
+            + QUICK_LINKS
         )
         send_telegram_message(message)
 
-    # Резкий каскад ликвидаций — отдельный немедленный алерт даже если он один
+    state["previously_triggered"] = meets_alert_condition
+
+    # Резкий каскад ликвидаций — отдельный немедленный алерт, не завязан на фронт (он и так
+    # считается только по последнему интервалу, так что естественным образом не спамит)
     if "liq_proxy" in unique_signals:
         liq_detail = [d for d in details if "каскад" in d]
         if liq_detail:
-            send_telegram_message(f"🚨 LAB: возможный каскад ликвидаций\n\n{liq_detail[0]}\n\nЦена: ${current['price']:.4f}")
+            send_telegram_message(
+                f"🚨 LAB: возможный каскад ликвидаций\n\n{liq_detail[0]}\n\nЦена: ${current['price']:.4f}"
+                + QUICK_LINKS
+            )
 
     state["history"] = history
     save_state(state)
