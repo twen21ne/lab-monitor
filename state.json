@@ -95,7 +95,14 @@
       "price": 0.463,
       "funding_rate": 0.00039,
       "open_interest": 19438290.9357941
+    },
+    {
+      "timestamp": 1783881588,
+      "price": 0.445,
+      "funding_rate": 0.0004,
+      "open_interest": 19069878.89796492
     }
   ],
-  "previously_triggered": false
+  "previously_triggered": false,
+  "telegram_update_offset": 0
 }
