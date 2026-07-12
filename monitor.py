@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-LAB Monitor — простой скрипт мониторинга признаков пампа/дампа на LABUSDT (Bybit Futures).
+LAB Monitor — простой скрипт мониторинга признаков пампа/дампа на LABUSDT.
 
-Использует только бесплатные публичные эндпоинты Bybit (без API-ключа).
-(Изначально использовался Binance, но он блокирует запросы с IP GitHub Actions — см. ниже.)
+Данные берутся через CoinGecko Derivatives API (агрегатор, не блокируется по стране в отличие
+от прямых обращений к Binance/Bybit с облачных IP — см. комментарий ниже).
 Состояние (история последних измерений) хранится в state.json и коммитится обратно в репозиторий
 GitHub Actions'ом, чтобы скрипт "помнил" предыдущие точки между запусками.
 
 Метрики:
-1. Funding rate — текущая ставка (premiumIndex). Порог: > 0.1% (0.001) по модулю.
-2. Open Interest — изменение за 1 час и за 24 часа. Пороги: >15% за 1ч ИЛИ >25% за 24ч.
+1. Funding rate — текущая ставка. Порог: > 0.1% по модулю.
+2. Open Interest (в USD) — изменение за 1 час и за 24 часа. Пороги: >15% за 1ч ИЛИ >25% за 24ч.
 3. "Каскад ликвидаций" (приближение) — резкое падение/рост цены > 5% ЗА ОДИН ИНТЕРВАЛ ОПРОСА (15 мин)
    вместе с падением OI > 5% в это же окно. Точных данных по объёму ликвидаций бесплатно и по расписанию
-   получить нельзя (публичный REST-эндпоинт Binance для этого закрыт), поэтому это осознанное упрощение.
+   получить нельзя, поэтому это осознанное упрощение.
 
 Алерт "внимание" отправляется, если сработали 2 из 3 метрик (funding, OI, liq-proxy) в одном и том же запуске.
 Алерт про funding отдельно тоже логируется, но не спамит, если сработал только один раз.
@@ -24,14 +24,21 @@ import time
 import requests
 
 SYMBOL = "LABUSDT"
-BASE_URL = "https://api.bybit.com"
+EXCHANGE_ID = "binance_futures"  # CoinGecko id для площадки, с которой берём тикер
+BASE_URL = "https://api.coingecko.com/api/v3"
 STATE_FILE = "state.json"
 
-# Раньше использовался Binance (fapi.binance.com), но он возвращает HTTP 451
-# "Service unavailable from a restricted location" для запросов с серверов GitHub Actions
-# (и вообще многих облачных дата-центров) — это ограничение биржи, не баг кода.
-# Bybit отдаёт те же данные (цена, funding rate, open interest) без такой блокировки,
-# причём одним запросом вместо двух.
+# История: сначала использовался Binance напрямую (fapi.binance.com) -> HTTP 451
+# "restricted location". Потом Bybit напрямую (api.bybit.com) -> тоже заблокировал
+# по стране через CloudFront. Обе биржи ограничивают доступ с IP дата-центров США
+# (там физически расположены раннеры GitHub Actions).
+# Решение: CoinGecko — это агрегатор, который сам стягивает данные с бирж на своей
+# стороне и отдаёт нам через свой API. Нас как клиента CoinGecko биржи не видят
+# напрямую, поэтому гео-блокировки такого рода не применяются.
+# Требуется бесплатный CoinGecko Demo API key (регистрация без карты):
+# https://www.coingecko.com/en/api/pricing -> "Demo Plan"
+
+COINGECKO_API_KEY = os.environ.get("COINGECKO_API_KEY")
 
 # ---- Пороги (настраиваются здесь) ----
 FUNDING_RATE_THRESHOLD = 0.001        # 0.1% за период расчёта funding rate
@@ -46,10 +53,10 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 
-def fetch_json(url, params):
-    """GET-запрос с понятной диагностикой: если биржа вернула не то, что ожидалось,
+def fetch_json(url, params=None, headers=None):
+    """GET-запрос с понятной диагностикой: если биржа/API вернула не то, что ожидалось,
     выводим статус-код и сырое тело ответа в лог, а не падаем с невнятным KeyError."""
-    resp = requests.get(url, params=params, timeout=10)
+    resp = requests.get(url, params=params, headers=headers, timeout=15)
     print(f"[DEBUG] GET {url} params={params} -> HTTP {resp.status_code}")
     try:
         data = resp.json()
@@ -62,23 +69,33 @@ def fetch_json(url, params):
 
 
 def fetch_current_data():
-    """Забираем funding rate, цену и open interest с публичного Bybit API (один запрос)."""
-    data = fetch_json(f"{BASE_URL}/v5/market/tickers", {"category": "linear", "symbol": SYMBOL})
+    """Забираем funding rate, цену и open interest через CoinGecko derivatives API."""
+    headers = {"x-cg-demo-api-key": COINGECKO_API_KEY} if COINGECKO_API_KEY else {}
+    if not COINGECKO_API_KEY:
+        print("[WARN] COINGECKO_API_KEY не задан — запрос, скорее всего, будет отклонён (rate limit/403).")
 
-    if data.get("retCode") != 0:
-        raise RuntimeError(f"Bybit вернул ошибку: {data}")
+    data = fetch_json(
+        f"{BASE_URL}/derivatives/exchanges/{EXCHANGE_ID}",
+        params={"include_tickers": "unexpired"},
+        headers=headers,
+    )
 
-    ticker_list = data.get("result", {}).get("list", [])
-    if not ticker_list:
-        raise RuntimeError(f"Bybit вернул пустой список тикеров для {SYMBOL}. Полный ответ: {data}")
+    tickers = data.get("tickers", [])
+    if not tickers:
+        raise RuntimeError(f"CoinGecko вернул пустой список тикеров для {EXCHANGE_ID}. Полный ответ: {data}")
 
-    ticker = ticker_list[0]
+    match = next((t for t in tickers if t.get("symbol") == SYMBOL), None)
+    if not match:
+        raise RuntimeError(
+            f"Тикер {SYMBOL} не найден среди {len(tickers)} тикеров биржи {EXCHANGE_ID}. "
+            f"Возможно, поменялось название пары или контракт делистнули."
+        )
 
     return {
         "timestamp": int(time.time()),
-        "price": float(ticker["markPrice"]),
-        "funding_rate": float(ticker["fundingRate"]),
-        "open_interest": float(ticker["openInterest"]),
+        "price": float(match["last"]),
+        "funding_rate": float(match.get("funding_rate") or 0) / 100,  # CoinGecko отдаёт в %, приводим к доле
+        "open_interest": float(match.get("open_interest_usd") or 0),
     }
 
 
