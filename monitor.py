@@ -41,9 +41,9 @@ STATE_FILE = "state.json"
 COINGECKO_API_KEY = os.environ.get("COINGECKO_API_KEY")
 
 # ---- Пороги (настраиваются здесь) ----
-FUNDING_RATE_THRESHOLD = 0.0000001        # 0.1% за период расчёта funding rate
-OI_CHANGE_1H_THRESHOLD = 0.0000001         # +15% за 1 час
-OI_CHANGE_24H_THRESHOLD = 0.0000001        # +25% за 24 часа
+FUNDING_RATE_THRESHOLD = 0.001        # 0.1% за период расчёта funding rate
+OI_CHANGE_1H_THRESHOLD = 0.15         # +15% за 1 час
+OI_CHANGE_24H_THRESHOLD = 0.25        # +25% за 24 часа
 PRICE_MOVE_INTERVAL_THRESHOLD = 0.05  # 5% за один запуск (15 мин) — компонент liq-proxy
 OI_DROP_INTERVAL_THRESHOLD = 0.05     # 5% падение OI за один запуск — компонент liq-proxy
 
@@ -186,8 +186,10 @@ def main():
     print(f"[{current['timestamp']}] price={current['price']} funding={fr} oi={current['open_interest']}")
     print(f"Сработавшие сигналы: {unique_signals}")
 
-    # Алерт "внимание": 2 из 3 метрик сработали одновременно
-    if len(unique_signals) >= 2:
+    # ВРЕМЕННО для теста: было len(unique_signals) >= 2, снижено до >= 1,
+    # чтобы проверить именно доставку в Telegram, не дожидаясь накопления истории OI.
+    # После успешного теста верни обратно >= 2.
+    if len(unique_signals) >= 1:
         message = (
             f"⚠️ LAB: сработало {len(unique_signals)} сигнала одновременно\n\n"
             + "\n".join(details)
