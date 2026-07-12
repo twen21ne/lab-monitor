@@ -141,6 +141,71 @@ def send_telegram_message(text):
         print(f"[ERROR] Telegram API вернул {resp.status_code}: {resp.text}")
 
 
+def get_new_telegram_commands(state):
+    """Проверяем, не написал ли пользователь боту команду (например /status) с прошлого запуска.
+    Используем Telegram getUpdates с offset, чтобы не обрабатывать одно и то же сообщение дважды.
+    Из-за того, что скрипт запускается раз в 15 минут (а не работает как постоянный сервер),
+    ответ на команду приходит с задержкой до 15 минут, а не мгновенно."""
+    if not TELEGRAM_BOT_TOKEN:
+        return []
+
+    offset = state.get("telegram_update_offset", 0)
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates"
+    try:
+        resp = requests.get(url, params={"offset": offset}, timeout=10)
+        data = resp.json()
+    except Exception as e:
+        print(f"[WARN] Не удалось получить обновления Telegram: {e}")
+        return []
+
+    if not data.get("ok"):
+        print(f"[WARN] Telegram getUpdates вернул ошибку: {data}")
+        return []
+
+    commands = []
+    max_update_id = offset - 1
+    for update in data.get("result", []):
+        max_update_id = max(max_update_id, update["update_id"])
+        message = update.get("message", {})
+        text = (message.get("text") or "").strip().lower()
+        chat_id = str(message.get("chat", {}).get("id", ""))
+        if TELEGRAM_CHAT_ID and chat_id != str(TELEGRAM_CHAT_ID):
+            continue  # игнорируем сообщения не из нашего чата
+        if text:
+            commands.append(text)
+
+    state["telegram_update_offset"] = max_update_id + 1
+    return commands
+
+
+def build_status_message(current, history):
+    """Собираем текущий срез по всем метрикам — по команде /status, независимо от порогов."""
+    point_1h = find_point_before(history, 3600)
+    point_24h = find_point_before(history, 86400)
+
+    change_1h = (
+        (current["open_interest"] - point_1h["open_interest"]) / point_1h["open_interest"]
+        if point_1h and point_1h["open_interest"] > 0 else None
+    )
+    change_24h = (
+        (current["open_interest"] - point_24h["open_interest"]) / point_24h["open_interest"]
+        if point_24h and point_24h["open_interest"] > 0 else None
+    )
+
+    lines = [
+        "📊 LAB: текущий статус",
+        "",
+        f"Цена: ${current['price']:.4f}",
+        f"Funding rate: {current['funding_rate']*100:.4f}% (порог {FUNDING_RATE_THRESHOLD*100:.2f}%)",
+        f"Open Interest: ${current['open_interest']:,.0f}",
+        f"OI изменение за 1ч: {f'{change_1h*100:+.1f}%' if change_1h is not None else 'ещё нет данных'} "
+        f"(порог +{OI_CHANGE_1H_THRESHOLD*100:.0f}%)",
+        f"OI изменение за 24ч: {f'{change_24h*100:+.1f}%' if change_24h is not None else 'ещё нет данных'} "
+        f"(порог +{OI_CHANGE_24H_THRESHOLD*100:.0f}%)",
+    ]
+    return "\n".join(lines) + QUICK_LINKS
+
+
 def main():
     state = load_state()
     history = state.get("history", [])
@@ -148,6 +213,11 @@ def main():
     current = fetch_current_data()
     history.append(current)
     history = history[-MAX_HISTORY_POINTS:]
+
+    # Проверяем, не прислал ли пользователь команду /status с прошлого запуска
+    commands = get_new_telegram_commands(state)
+    if any(cmd.startswith("/status") for cmd in commands):
+        send_telegram_message(build_status_message(current, history))
 
     signals = []
     details = []
