@@ -41,9 +41,9 @@ STATE_FILE = "state.json"
 COINGECKO_API_KEY = os.environ.get("COINGECKO_API_KEY")
 
 # ---- Пороги (настраиваются здесь) ----
-FUNDING_RATE_THRESHOLD = 0.001        # 0.1% за период расчёта funding rate
-OI_CHANGE_1H_THRESHOLD = 0.15         # +15% за 1 час
-OI_CHANGE_24H_THRESHOLD = 0.25        # +25% за 24 часа
+FUNDING_RATE_THRESHOLD = 0.0000001        # 0.1% за период расчёта funding rate
+OI_CHANGE_1H_THRESHOLD = 0.0000001         # +15% за 1 час
+OI_CHANGE_24H_THRESHOLD = 0.0000001        # +25% за 24 часа
 PRICE_MOVE_INTERVAL_THRESHOLD = 0.05  # 5% за один запуск (15 мин) — компонент liq-proxy
 OI_DROP_INTERVAL_THRESHOLD = 0.05     # 5% падение OI за один запуск — компонент liq-proxy
 
