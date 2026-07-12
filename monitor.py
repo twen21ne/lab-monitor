@@ -39,10 +39,30 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID")
 
 
+def fetch_json(url, params):
+    """GET-запрос с понятной диагностикой: если Binance вернул не то, что ожидалось,
+    выводим статус-код и сырое тело ответа в лог, а не падаем с невнятным KeyError."""
+    resp = requests.get(url, params=params, timeout=10)
+    print(f"[DEBUG] GET {url} params={params} -> HTTP {resp.status_code}")
+    try:
+        data = resp.json()
+    except ValueError:
+        print(f"[ERROR] Ответ не в формате JSON. Сырое тело ответа:\n{resp.text[:1000]}")
+        raise
+    if resp.status_code != 200:
+        print(f"[ERROR] Binance вернул ошибку вместо данных: {data}")
+    return data
+
+
 def fetch_current_data():
     """Забираем funding rate, цену и open interest с публичного Binance Futures API."""
-    premium = requests.get(f"{BASE_URL}/fapi/v1/premiumIndex", params={"symbol": SYMBOL}, timeout=10).json()
-    oi = requests.get(f"{BASE_URL}/fapi/v1/openInterest", params={"symbol": SYMBOL}, timeout=10).json()
+    premium = fetch_json(f"{BASE_URL}/fapi/v1/premiumIndex", {"symbol": SYMBOL})
+    oi = fetch_json(f"{BASE_URL}/fapi/v1/openInterest", {"symbol": SYMBOL})
+
+    if "markPrice" not in premium:
+        raise RuntimeError(f"В ответе premiumIndex нет markPrice. Полный ответ: {premium}")
+    if "openInterest" not in oi:
+        raise RuntimeError(f"В ответе openInterest нет openInterest. Полный ответ: {oi}")
 
     return {
         "timestamp": int(time.time()),
