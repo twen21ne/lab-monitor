@@ -473,6 +473,12 @@
       "price": 0.217,
       "funding_rate": 0.00048,
       "open_interest": 19724601.14104632
+    },
+    {
+      "timestamp": 1784250616,
+      "price": 0.218,
+      "funding_rate": 0.0006,
+      "open_interest": 19511615.4721952
     }
   ],
   "previously_triggered": false,
