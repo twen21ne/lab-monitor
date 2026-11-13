@@ -1,12 +1,6 @@
 {
   "history": [
     {
-      "timestamp": 1792730554,
-      "price": 0.044,
-      "funding_rate": 0.00010999999999999999,
-      "open_interest": 9571897.010087501
-    },
-    {
       "timestamp": 1792748098,
       "price": 0.043,
       "funding_rate": 5e-05,
@@ -599,6 +593,12 @@
       "price": 0.039,
       "funding_rate": 5e-05,
       "open_interest": 7920015.81098364
+    },
+    {
+      "timestamp": 1794611177,
+      "price": 0.039,
+      "funding_rate": 5e-05,
+      "open_interest": 7922911.869110471
     }
   ],
   "previously_triggered": false,
